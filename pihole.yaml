@@ -1,0 +1,168 @@
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: pihole-data
+  labels:
+    type: local
+spec:
+  storageClassName: manual
+  capacity:
+    storage: 100Mi
+  accessModes:
+    - ReadWriteOnce
+  hostPath:
+    path: "/home/ubuntu/Documentos/pihole/dnsmasq" # the directory created on node
+
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: pihole-dns
+  labels:
+    type: local
+spec:
+  storageClassName: manual
+  capacity:
+    storage: 100Mi
+  accessModes:
+    - ReadWriteOnce
+  hostPath:
+    path: "/home/ubuntu/Documentos/pihole/etc" # the directory created on node
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: pihole-data-claim
+spec:
+  storageClassName: manual
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 100Mi # the storage should be less than capacity in persistent volume
+---
+
+
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: pihole-dns-claim
+spec:
+  storageClassName: manual
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 100Mi # the storage should be less than capacity in persistent volume
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pihole
+  labels:  
+    app: pihole
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: pihole
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: pihole
+    spec:
+      containers:
+        - env:
+            - name: TZ
+              value: America/Lima
+            - name: WEBPASSWORD
+              value: admin
+          image: pihole/pihole:latest
+          name: pihole
+          ports:
+            - containerPort: 53
+            - containerPort: 53
+              protocol: UDP
+            - containerPort: 67
+              protocol: UDP
+            - containerPort: 80
+          volumeMounts:
+            - mountPath: /etc/pihole/
+              name: pihole-data
+            - mountPath: /etc/dnsmasq.d/
+              name: pihole-dns
+      restartPolicy: Always
+      volumes:
+        - name: pihole-data
+          persistentVolumeClaim:
+            claimName: pihole-data-claim
+        - name: pihole-dns
+          persistentVolumeClaim:
+            claimName: pihole-dns-claim
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pihole
+spec:
+    type: NodePort
+    selector:
+      app:  pihole  
+    ports:
+      - name: dnstcp
+        port: 53
+        protocol: TCP
+      - name: dnsudp
+        port: 53
+        protocol: UDP
+      - name: dchp
+        port: 67
+        protocol: UDP
+      - name: web
+        port: 80
+        protocol: TCP
+      - name: https
+        port: 443
+        protocol: TCP
+---
+kind: Service
+apiVersion: v1
+metadata:
+  name: piholeudp
+  annotations:
+    metallb.universe.tf/allow-shared-ip: dns
+spec:
+  selector:
+    app: pihole
+  ports:
+    - protocol: UDP
+      port: 53
+      name: dnsudp
+      targetPort: 53
+  type: LoadBalancer
+  loadBalancerIP: 192.168.1.100
+---
+kind: Service
+apiVersion: v1
+metadata:
+  name: piholetcp
+  annotations:
+    metallb.universe.tf/allow-shared-ip: dns
+spec:
+  selector:
+    app: pihole
+  ports:
+    - protocol: TCP
+      port: 53
+      name: dnstcp
+      targetPort: 53
+    - protocol: TCP
+      port: 80
+      name: web
+      targetPort: 80
+  type: LoadBalancer
+  loadBalancerIP: 192.168.1.100
